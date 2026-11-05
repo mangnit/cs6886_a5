@@ -1,9 +1,15 @@
 /*
  * attn_loops.c -- Q3a: loop reordering so the compiler can vectorise.
  *
- * Placeholder: replace the body of attention() with your implementation.
- * Keep the driver (main) below unchanged. See attn_naive.c for the input and
- * output format.
+ * Same three steps as attn_naive.c, but every innermost loop now walks memory
+ * with unit stride and carries no floating-point reduction, so clang -O3 can
+ * vectorise it without -ffast-math:
+ *   1. S = Q K^T: K is transposed once into Kt (d x N) and the loops run i-k-j,
+ *      so the inner loop is S[i][j] += Q[i][k] * Kt[k][j] over contiguous j.
+ *   2. softmax: as in naive (max and sum are reductions, expf is a libm call).
+ *   3. O = S V: the loops run i-j-k, so the inner loop is
+ *      O[i][k] += S[i][j] * V[j][k] over contiguous k.
+ * Keep the driver (main) below unchanged.
  */
 #define _POSIX_C_SOURCE 200809L
 #include <math.h>
@@ -17,13 +23,64 @@
 #endif
 
 /* ------------------------------------------------------------------------- */
-/* attention(): write your implementation here.                               */
+/* attention(): loop-reordered version.                                       */
 /* ------------------------------------------------------------------------- */
 void attention(const float *Q, const float *K, const float *V, float *O, int N, int d)
 {
-    (void)Q; (void)K; (void)V; (void)O; (void)N; (void)d;
-    printf("attn_loops: not implemented yet\n");
-    exit(0); /* no output file is written, so `make check` skips this variant */
+    const float scale = 1.0f / sqrtf((float)d);
+    float *S = malloc((size_t)N * N * sizeof(float));
+    float *Kt = malloc((size_t)d * N * sizeof(float));
+
+    /* 0. Kt = K^T, so that step 1 reads K along contiguous rows of Kt */
+    for (int j = 0; j < N; j++)
+        for (int k = 0; k < d; k++)
+            Kt[(size_t)k * N + j] = K[(size_t)j * d + k];
+
+    /* 1. S = Q K^T * scale, loop order i-k-j */
+    for (int i = 0; i < N; i++) {
+        float *restrict srow = S + (size_t)i * N;
+        for (int j = 0; j < N; j++)
+            srow[j] = 0.0f;
+        for (int k = 0; k < d; k++) {
+            const float q = Q[(size_t)i * d + k] * scale;
+            const float *restrict kt = Kt + (size_t)k * N;
+            for (int j = 0; j < N; j++)
+                srow[j] += q * kt[j];
+        }
+    }
+
+    /* 2. softmax of each row of S */
+    for (int i = 0; i < N; i++) {
+        float *row = S + (size_t)i * N;
+        float max = row[0];
+        for (int j = 1; j < N; j++)
+            if (row[j] > max)
+                max = row[j];
+        float sum = 0.0f;
+        for (int j = 0; j < N; j++) {
+            row[j] = expf(row[j] - max);
+            sum += row[j];
+        }
+        for (int j = 0; j < N; j++)
+            row[j] = row[j] / sum;
+    }
+
+    /* 3. O = S V, loop order i-j-k */
+    for (int i = 0; i < N; i++) {
+        const float *restrict srow = S + (size_t)i * N;
+        float *restrict orow = O + (size_t)i * d;
+        for (int k = 0; k < d; k++)
+            orow[k] = 0.0f;
+        for (int j = 0; j < N; j++) {
+            const float s = srow[j];
+            const float *restrict v = V + (size_t)j * d;
+            for (int k = 0; k < d; k++)
+                orow[k] += s * v[k];
+        }
+    }
+
+    free(Kt);
+    free(S);
 }
 
 /* ------------------------------------------------------------------------- */

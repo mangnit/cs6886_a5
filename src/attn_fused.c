@@ -1,9 +1,13 @@
 /*
  * attn_fused.c -- Q3c: row-wise fusion (the N x N matrix is never stored).
  *
- * Placeholder: replace the body of attention() with your implementation.
- * Keep the driver (main) below unchanged. See attn_naive.c for the input and
- * output format.
+ * For each query row i, the three steps run back to back on one row of scores
+ * s (N floats, 16 KB at N = 4096, so it stays in L1/L2):
+ *   1. s = q_i K^T * scale, with Kt = K^T and the k-j loop order of attn_loops.c
+ *   2. softmax of s (the division by the sum is deferred to step 3)
+ *   3. O_i = (sum_j s_j V_j) / sum, with the j-k loop order of attn_loops.c
+ * Only O(N) scratch memory is used instead of the N x N matrix S.
+ * Keep the driver (main) below unchanged.
  */
 #define _POSIX_C_SOURCE 200809L
 #include <math.h>
@@ -17,13 +21,60 @@
 #endif
 
 /* ------------------------------------------------------------------------- */
-/* attention(): write your implementation here.                               */
+/* attention(): row-wise fused version.                                       */
 /* ------------------------------------------------------------------------- */
 void attention(const float *Q, const float *K, const float *V, float *O, int N, int d)
 {
-    (void)Q; (void)K; (void)V; (void)O; (void)N; (void)d;
-    printf("attn_fused: not implemented yet\n");
-    exit(0); /* no output file is written, so `make check` skips this variant */
+    const float scale = 1.0f / sqrtf((float)d);
+    float *Kt = malloc((size_t)d * N * sizeof(float));
+    float *s = malloc((size_t)N * sizeof(float));
+
+    /* Kt = K^T, so that step 1 reads K along contiguous rows of Kt */
+    for (int j = 0; j < N; j++)
+        for (int k = 0; k < d; k++)
+            Kt[(size_t)k * N + j] = K[(size_t)j * d + k];
+
+    for (int i = 0; i < N; i++) {
+        float *restrict srow = s;
+        float *restrict orow = O + (size_t)i * d;
+
+        /* 1. s = q_i K^T * scale */
+        for (int j = 0; j < N; j++)
+            srow[j] = 0.0f;
+        for (int k = 0; k < d; k++) {
+            const float q = Q[(size_t)i * d + k] * scale;
+            const float *restrict kt = Kt + (size_t)k * N;
+            for (int j = 0; j < N; j++)
+                srow[j] += q * kt[j];
+        }
+
+        /* 2. softmax of s, without the final division */
+        float max = srow[0];
+        for (int j = 1; j < N; j++)
+            if (srow[j] > max)
+                max = srow[j];
+        float sum = 0.0f;
+        for (int j = 0; j < N; j++) {
+            srow[j] = expf(srow[j] - max);
+            sum += srow[j];
+        }
+
+        /* 3. O_i = (s V) / sum */
+        for (int k = 0; k < d; k++)
+            orow[k] = 0.0f;
+        for (int j = 0; j < N; j++) {
+            const float p = srow[j];
+            const float *restrict v = V + (size_t)j * d;
+            for (int k = 0; k < d; k++)
+                orow[k] += p * v[k];
+        }
+        const float inv = 1.0f / sum;
+        for (int k = 0; k < d; k++)
+            orow[k] *= inv;
+    }
+
+    free(s);
+    free(Kt);
 }
 
 /* ------------------------------------------------------------------------- */

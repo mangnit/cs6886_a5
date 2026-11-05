@@ -1,30 +1,28 @@
 # Machine specification (Q1). Fill in every field; give units. Fill in N/A if not applicable.
 
-CPU model                       :
-Microarchitecture               :
-Physical cores                  :
-Logical cores (hardware threads):
-Performance / efficiency cores  :
-Base clock (GHz)                :
-Max single-core clock (GHz)     :
-All-core clock under load (GHz) :
-SIMD instruction set and width  :
-FMA units per core              :
-Vector registers per core       :
-L1 data cache (per core)        :
-L2 cache (size, shared by)      :
-L3 cache (size, shared by)      :
-Cache line size (bytes)         :
-RAM size (GB)                   :
-RAM type, speed (MT/s), channels:
-Operating system                :
-Compiler and version            :
+CPU model                       : Intel Core i5-1135G7 (11th Gen, Tiger Lake-UP3), Dell Inspiron 5502 laptop
+Microarchitecture               : Tiger Lake (Willow Cove cores), Intel 10 nm SuperFin
+Physical cores                  : 4
+Logical cores (hardware threads): 8 (2-way Hyper-Threading)
+Performance / efficiency cores  : 4 P-cores / 0 E-cores (not a hybrid design)
+Base clock (GHz)                : 2.4 (at 28 W; 0.9 GHz at the 12 W cTDP-down)
+Max single-core clock (GHz)     : 4.2 (Turbo Boost 2.0); measured 4.1 with 1 busy thread
+All-core clock under load (GHz) : 2.8 measured with all 8 threads running FMA code (3.4 with 4 busy threads; Intel's nominal all-core turbo is 3.8, not sustained on this laptop)
+SIMD instruction set and width  : AVX-512 (512-bit, 16 FP32 lanes); also AVX2 + FMA3 (256-bit, 8 FP32 lanes)
+FMA units per core              : 2 x 256-bit (ports 0 and 1), which act as 1 x 512-bit FMA unit for AVX-512 instructions = 32 FP32 FLOP/cycle either way
+Vector registers per core       : 32 x 512-bit (zmm0-zmm31) per hardware thread
+L1 data cache (per core)        : 48 KB, 12-way
+L2 cache (size, shared by)      : 1.25 MB per core, 20-way, private (not shared)
+L3 cache (size, shared by)      : 8 MB, 8-way, shared by all 4 cores
+Cache line size (bytes)         : 64
+RAM size (GB)                   : 8 (WSL2 is limited to 6 GB by .wslconfig)
+RAM type, speed (MT/s), channels: DDR4-3200 SO-DIMM (Samsung M471A1K43DB1-CWE), 3200 MT/s, 1 channel (single DIMM)
+Operating system                : Windows 11 Home (build 26200) + WSL2 Ubuntu 20.04.6 LTS, Linux 6.6.87.2-microsoft-standard-WSL2
+Compiler and version            : clang 23.1.4 (conda-forge build), -O3 -march=native [-fopenmp]
 
 # Derived (show the calculation in report.pdf)
-Peak FP32 GFLOP/s, one core     :
-Peak FP32 GFLOP/s, all cores    :
-Memory bandwidth (GB/s)         :
-Ridge point, one core (FLOP/B)  :
-Ridge point, all cores (FLOP/B) :
-
-
+Peak FP32 GFLOP/s, one core     : 134.4 = 32 FLOP/cycle x 4.2 GHz (measured with own FMA microbenchmark: 127.8)
+Peak FP32 GFLOP/s, all cores    : 358.4 = 4 cores x 32 FLOP/cycle x 2.8 GHz (486.4 at the nominal 3.8 GHz; measured: 353.5)
+Memory bandwidth (GB/s)         : 25.6 = 3200 MT/s x 8 B x 1 channel (measured STREAM triad: 15.2 with all threads, 20.3 counting write-allocate)
+Ridge point, one core (FLOP/B)  : 5.25 = 134.4 / 25.6
+Ridge point, all cores (FLOP/B) : 14.0 = 358.4 / 25.6
